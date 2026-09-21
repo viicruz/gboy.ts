@@ -232,6 +232,66 @@ describe("Emulator", () => {
     });
   });
 
+  describe("battery RAM", () => {
+    it("keeps the write listener across reset", () => {
+      const emu = new Emulator(makeMBC1ROM(4, 2));
+      let calls = 0;
+      emu.setOnRamWrite(() => {
+        calls += 1;
+      });
+
+      emu.reset();
+      emu.cartridge.writeByte(0x0000, 0x0A);
+      emu.cartridge.writeByte(0xA000, 0x3C);
+
+      expect(calls).toBe(1);
+    });
+
+    it("does not fire the write listener while restoring RAM", () => {
+      const rom = makeMBC1ROM(4, 2);
+      const emu = new Emulator(rom);
+      let calls = 0;
+      emu.setOnRamWrite(() => {
+        calls += 1;
+      });
+
+      const data = new Uint8Array(8192);
+      data[0] = 0x42;
+      emu.setRam(data);
+      const state = emu.serialize();
+      Emulator.deserialize(rom, state);
+
+      expect(calls).toBe(0);
+    });
+
+    it("round-trips RAM bytes through a savestate without exposing the MBC header", () => {
+      const rom = makeMBC1ROM(4, 2);
+      const emu = new Emulator(rom);
+      const data = new Uint8Array(8192);
+      data[0] = 0x11;
+      data[100] = 0x22;
+      data[8191] = 0x33;
+      emu.setRam(data);
+
+      const state = emu.serialize();
+      const view = new DataView(state.buffer, state.byteOffset, state.byteLength);
+      const cpuLen = view.getUint32(0, true);
+      const mmuLen = view.getUint32(4, true);
+      const ppuLen = view.getUint32(8, true);
+      const timerLen = view.getUint32(12, true);
+      const joypadLen = view.getUint32(16, true);
+      const cartLen = view.getUint32(20, true);
+      const cartOffset = 28 + cpuLen + mmuLen + ppuLen + timerLen + joypadLen;
+      const cartState = state.subarray(cartOffset, cartOffset + cartLen);
+
+      expect(cartLen).toBe(8 + 8192);
+      expect(cartState.subarray(8)).toEqual(data);
+
+      const restored = Emulator.deserialize(rom, state);
+      expect(restored.getRam()).toEqual(data);
+    });
+  });
+
   describe("pressButtonForFrames", () => {
     it("holds button for specified frames then releases", () => {
       const rom = makeMinimalROM();

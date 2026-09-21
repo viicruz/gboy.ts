@@ -758,4 +758,131 @@ describe("Cartridge", () => {
       expect(restored.readByte(0x4000)).toBe(1);
     });
   });
+
+  describe("getRam / setRam", () => {
+    it("returns an empty array when the cartridge has no RAM", () => {
+      const cart = Cartridge.fromROM(makeROM(2, 0x03, 0));
+      expect(cart.getRam()).toEqual(new Uint8Array(0));
+    });
+
+    it("throws when setRam receives a non-empty buffer and the cartridge has no RAM", () => {
+      const cart = Cartridge.fromROM(makeROM(2, 0x03, 0));
+      expect(() => cart.setRam(new Uint8Array([0x01]))).toThrow();
+    });
+
+    it("accepts an empty buffer when the cartridge has no RAM", () => {
+      const cart = Cartridge.fromROM(makeROM(2, 0x03, 0));
+      expect(() => cart.setRam(new Uint8Array(0))).not.toThrow();
+    });
+
+    it("returns the same bytes after setRam", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      const data = new Uint8Array(8192);
+      data[0] = 0x11;
+      data[8191] = 0x22;
+      cart.setRam(data);
+      expect(cart.getRam()).toEqual(data);
+    });
+
+    it("returns a copy so mutating it does not change a later getRam", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      const data = new Uint8Array(8192);
+      data[0] = 0x42;
+      cart.setRam(data);
+
+      const first = cart.getRam();
+      first[0] = 0x99;
+      expect(cart.getRam()[0]).toBe(0x42);
+    });
+
+    it("throws on the wrong length and leaves the previous RAM unchanged", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      const data = new Uint8Array(8192);
+      data[0] = 0x55;
+      cart.setRam(data);
+
+      expect(() => cart.setRam(new Uint8Array(2048))).toThrow();
+      expect(cart.getRam()).toEqual(data);
+    });
+
+    it("loads RAM while the enable latch is false and that byte is readable after enabling RAM", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      const data = new Uint8Array(8192);
+      data[0] = 0xAB;
+      cart.setRam(data);
+
+      expect(cart.readByte(0xA000)).toBe(0xFF);
+      cart.writeByte(0x0000, 0x0A);
+      expect(cart.readByte(0xA000)).toBe(0xAB);
+    });
+
+    it("does not call the write listener", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.setRam(new Uint8Array(8192).fill(0x01));
+      expect(calls).toBe(0);
+    });
+  });
+
+  describe("onRamWrite", () => {
+    it("calls the listener once when a changed byte is written after enabling RAM", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.writeByte(0x0000, 0x0A);
+      cart.writeByte(0xA000, 0x7E);
+      expect(calls).toBe(1);
+    });
+
+    it("does not call the listener when the same byte is written again", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.writeByte(0x0000, 0x0A);
+      cart.writeByte(0xA000, 0x7E);
+      cart.writeByte(0xA000, 0x7E);
+      expect(calls).toBe(1);
+    });
+
+    it("does not call the listener while RAM is disabled", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.writeByte(0xA000, 0x7E);
+      expect(calls).toBe(0);
+    });
+
+    it("does not call the listener for an MBC bank-select write", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.writeByte(0x0000, 0x0A);
+      cart.writeByte(0x2000, 0x02);
+      expect(calls).toBe(0);
+    });
+
+    it("stops further calls after setOnRamWrite(null)", () => {
+      const cart = Cartridge.fromROM(makeROM(4, 0x03, 2));
+      let calls = 0;
+      cart.setOnRamWrite(() => {
+        calls += 1;
+      });
+      cart.writeByte(0x0000, 0x0A);
+      cart.writeByte(0xA000, 0x01);
+      cart.setOnRamWrite(null);
+      cart.writeByte(0xA000, 0x02);
+      expect(calls).toBe(1);
+    });
+  });
 });
