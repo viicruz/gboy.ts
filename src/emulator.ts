@@ -20,6 +20,7 @@ export class Emulator {
   apu: APU;
   private romData: Uint8Array;
   private cycleDebt = 0;
+  private onRamWrite: (() => void) | null = null;
 
   constructor(romData: Uint8Array) {
     this.romData = romData;
@@ -191,6 +192,26 @@ export class Emulator {
 
     this.cpu = new CPU(this.mmu);
     this.cycleDebt = 0;
+    this.cartridge.setOnRamWrite(this.onRamWrite);
+  }
+
+  getRam(): Uint8Array {
+    return this.cartridge.getRam();
+  }
+
+  setRam(data: Uint8Array): void {
+    this.cartridge.setRam(data);
+  }
+
+  /**
+   * Registers a listener called when the game writes a changed byte to cartridge RAM.
+   * The callback runs on the CPU hot path and must not do file I/O.
+   * `reset()` keeps this listener. `deserialize()` returns a new instance, so the caller
+   * must call `setOnRamWrite` again after restore, same as after `new Emulator(rom)`.
+   */
+  setOnRamWrite(listener: (() => void) | null): void {
+    this.onRamWrite = listener;
+    this.cartridge.setOnRamWrite(listener);
   }
 
   serialize(): Uint8Array {
@@ -236,6 +257,10 @@ export class Emulator {
     return buffer;
   }
 
+  /**
+   * Restores a full savestate into a new emulator. The RAM-write listener is not copied;
+   * call `setOnRamWrite` on the returned instance.
+   */
   static deserialize(romData: Uint8Array, state: Uint8Array): Emulator {
     const MIN_HEADER_SIZE = 28; // 7 component lengths * 4 bytes each
     if (state.length < MIN_HEADER_SIZE) {

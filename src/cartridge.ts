@@ -13,6 +13,7 @@ export class Cartridge {
   private bankingMode = 0;
   private romBankLow = 1;
   private romBankHigh = 0;
+  private onRamWrite: (() => void) | null = null;
 
   private constructor(rom: Uint8Array, mbcType: MBCType, romBankCount: number, ramSize: number) {
     this.rom = rom;
@@ -153,11 +154,29 @@ export class Cartridge {
       if (this.isRtcSelected()) return;
       const bank = this.getEffectiveRamBank();
       const offset = bank * 0x2000 + (address - 0xA000);
-      if (offset < this.ramSize) {
+      if (offset < this.ramSize && this.ram[offset] !== value) {
         this.ram[offset] = value;
+        this.onRamWrite?.();
       }
       return;
     }
+  }
+
+  getRam(): Uint8Array {
+    return this.ram.slice();
+  }
+
+  setRam(data: Uint8Array): void {
+    if (data.length !== this.ramSize) {
+      throw new Error(
+        `Cartridge RAM size mismatch: expected ${this.ramSize} bytes, got ${data.length}`
+      );
+    }
+    this.ram.set(data);
+  }
+
+  setOnRamWrite(listener: (() => void) | null): void {
+    this.onRamWrite = listener;
   }
 
   private updateRomBank(): void {
